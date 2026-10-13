@@ -5,12 +5,12 @@
       CONFIG
    ═══════════════════════════════════════════════════════════════ */
 
-    const TRAKT_CLIENT_ID = "YOUR_CLIENT_ID";
+    const TMDB_API_KEY = "YOUR_TMDB_API_KEY";   // YOUR API KEY HERE! (not read access token)
     const SHOW_RATING = true;                   // Show the movie's score next to the year
     const SHOW_TRENDING_MOVIES = true;          // Show "Trending Movies" section
-    const SHOW_TRENDING_SHOWS = true;          // Show "Trending Shows" section
-    const SHOW_PLATFORMS = true;               // Show "Platforms" section
-    const SHOW_FRANCHISES = true;              // Show "Franchises" section
+    const SHOW_TRENDING_SHOWS = true;           // Show "Trending Shows" section
+    const SHOW_PLATFORMS = true;                // Show "Platforms" section
+    const SHOW_FRANCHISES = true;               // Show "Franchises" section
     const SHOW_TRENDING_RANK_NUMBERS = true;    // Show the movie's ranking badge
     const LIMIT = 25;                           // How many movies/shows/cards to display (max 50)
 
@@ -199,7 +199,7 @@
                 --cardWidth: calc(var(--effectiveWidth) / var(--cardCount) - var(--itemColumnGap));
             }
 
-            /* TRAKT pill */
+            /* TMDB pill */
             .top10-section .top10-pill {
                 display: inline-flex;
                 align-items: center;
@@ -560,99 +560,251 @@
     }
 
     /* ═══════════════════════════════════════════════════════════════
-       TRAKT TRENDING MATCHED AGAINST JELLYFIN LIBRARY
+       TMDB TRENDING MATCHED AGAINST JELLYFIN LIBRARY
     ═══════════════════════════════════════════════════════════════ */
     async function getTop10(type) {
-        const endpoint = type === "movie" ? "movies" : "shows";
-        let trending = [];
-
-        try {
-            const r = await fetch(`https://api.trakt.tv/${endpoint}/trending?=${LIMIT}`, {
-                headers: {
-                    "Content-Type": "application/json",
-                    "trakt-api-version": "2",
-                    "trakt-api-key": TRAKT_CLIENT_ID
-                }
-            });
-
-            if (r.ok) trending = await r.json();
-        } catch {
+        const mediaType = type === "movie" ? "movie" : "tv";
+        const catalog = await getJellyfinCatalog(type);
+    
+        if (!catalog.length) {
+            console.warn("[TMDb Trending] Jellyfin catalog returned no items");
             return [];
         }
-
-        const catalog = await getJellyfinCatalog(type);
-        const idMap = new Map();
-
+    
+        const tmdbMap = new Map();
+    
         for (const item of catalog) {
             const ids = item.ProviderIds || {};
             const tmdb = ids.Tmdb || ids.TMDb;
-            const imdb = ids.Imdb || ids.IMDB || ids.ImdbId;
-
-            if (tmdb) idMap.set("tmdb_" + String(tmdb), item);
-            if (imdb) idMap.set("imdb_" + String(imdb), item);
+    
+            if (tmdb) {
+                tmdbMap.set(String(tmdb), item);
+            }
         }
-
+    
+        console.log(
+            "[TMDb Trending] Jellyfin catalog:",
+            catalog.length,
+            "items /",
+            tmdbMap.size,
+            "with TMDb IDs"
+        );
+    
+        /*
+         * TMDb normally returns 20 items per page.
+         * Fetch enough pages to satisfy LIMIT.
+         */
+        const pagesNeeded = Math.ceil(LIMIT / 20);
+        let trending = [];
+    
+        try {
+            for (let page = 1; page <= pagesNeeded; page++) {
+                const url =
+                    `https://api.themoviedb.org/3/trending/${mediaType}/day` +
+                    `?api_key=${encodeURIComponent(TMDB_API_KEY)}` +
+                    `&language=en-US` +
+                    `&page=${page}`;
+    
+                const response = await fetch(url, {
+                    headers: {
+                        accept: "application/json"
+                    }
+                });
+    
+                if (!response.ok) {
+                    console.error(
+                        "[TMDb Trending] Request failed:",
+                        response.status,
+                        response.statusText
+                    );
+    
+                    break;
+                }
+    
+                const data = await response.json();
+    
+                if (!Array.isArray(data.results)) {
+                    break;
+                }
+    
+                trending.push(...data.results);
+    
+                if (page >= (data.total_pages || 1)) {
+                    break;
+                }
+            }
+        } catch (error) {
+            console.error(
+                "[TMDb Trending] Request threw:",
+                error
+            );
+    
+            return [];
+        }
+    
+        trending = trending.slice(0, LIMIT);
+    
+        console.log(
+            "[TMDb Trending] TMDb returned:",
+            trending.length,
+            type === "movie" ? "movies" : "shows"
+        );
+    
         const results = [];
         const seen = new Set();
         const { base } = gc();
-
-        const fallbackImg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='270'%3E%3Crect width='180' height='270' fill='%23111'/%3E%3C/svg%3E";
-
-        for (const entry of trending) {
-            if (results.length >= LIMIT) break;
-
-            const media = type === "movie" ? entry.movie : entry.show;
-            if (!media) continue;
-
-            const tmdbId = media.ids?.tmdb?.toString();
-            const imdbId = media.ids?.imdb?.toString();
-
-            let match = null;
-
-            if (tmdbId) match = idMap.get("tmdb_" + tmdbId);
-            if (!match && imdbId) match = idMap.get("imdb_" + imdbId);
-
+    
+        const fallbackImg =
+            "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' " +
+            "width='180' height='270'%3E%3Crect width='180' height='270' " +
+            "fill='%23111'/%3E%3C/svg%3E";
+    
+        for (const media of trending) {
+            if (results.length >= LIMIT) {
+                break;
+            }
+    
+            const tmdbId = String(media.id);
+    
+            /*
+             * Preferred match:
+             * TMDb ID from TMDb → Jellyfin ProviderIds.Tmdb
+             */
+            let match = tmdbMap.get(tmdbId);
+    
+            /*
+             * Fallback for Jellyfin items missing a TMDb ProviderId:
+             * match title + year.
+             */
             if (!match) {
-                const title = (media.title || "").toLowerCase();
-
+                const tmdbTitle =
+                    type === "movie"
+                        ? media.title
+                        : media.name;
+    
+                const tmdbDate =
+                    type === "movie"
+                        ? media.release_date
+                        : media.first_air_date;
+    
+                const tmdbYear = tmdbDate
+                    ? Number(tmdbDate.substring(0, 4))
+                    : 0;
+    
+                const normalizedTitle =
+                    (tmdbTitle || "")
+                        .trim()
+                        .toLowerCase();
+    
                 match = catalog.find(item => {
-                    const name = (item.Name || "").toLowerCase();
-                    const originalTitle = (item.OriginalTitle || "").toLowerCase();
-                    const jellyfinYear = Number(item.ProductionYear || 0);
-                    const traktYear = Number(media.year || 0);
-
-                    return (
-                        (name === title || originalTitle === title) &&
-                        Math.abs(jellyfinYear - traktYear) <= 1
-                    );
+                    const name =
+                        (item.Name || "")
+                            .trim()
+                            .toLowerCase();
+    
+                    const originalTitle =
+                        (item.OriginalTitle || "")
+                            .trim()
+                            .toLowerCase();
+    
+                    const jellyfinYear =
+                        Number(item.ProductionYear || 0);
+    
+                    const titleMatches =
+                        name === normalizedTitle ||
+                        originalTitle === normalizedTitle;
+    
+                    /*
+                     * Allow a one-year discrepancy because release years
+                     * can differ between festival/theatrical/TV metadata.
+                     */
+                    const yearMatches =
+                        !tmdbYear ||
+                        !jellyfinYear ||
+                        Math.abs(jellyfinYear - tmdbYear) <= 1;
+    
+                    return titleMatches && yearMatches;
                 });
             }
-
-            if (!match || seen.has(match.Id)) continue;
-
+    
+            if (!match || seen.has(match.Id)) {
+                continue;
+            }
+    
             seen.add(match.Id);
-
-            const img = match.ImageTags?.Primary
-                ? `${base}/Items/${match.Id}/Images/Primary?maxHeight=400&tag=${match.ImageTags.Primary}`
-                : fallbackImg;
-
-            const rating = Number(match.CommunityRating);
-
+    
+            const img =
+                match.ImageTags?.Primary
+                    ? `${base}/Items/${match.Id}/Images/Primary?maxHeight=400&tag=${match.ImageTags.Primary}`
+                    : fallbackImg;
+    
+            const rating =
+                Number(match.CommunityRating);
+    
+            const tmdbTitle =
+                type === "movie"
+                    ? media.title
+                    : media.name;
+    
+            const tmdbDate =
+                type === "movie"
+                    ? media.release_date
+                    : media.first_air_date;
+    
+            const tmdbYear =
+                tmdbDate
+                    ? tmdbDate.substring(0, 4)
+                    : "";
+    
             results.push({
-                name: match.Name || media.title || "Untitled",
-                year: match.ProductionYear || media.year || "",
+                name:
+                    match.Name ||
+                    tmdbTitle ||
+                    "Untitled",
+    
+                year:
+                    match.ProductionYear ||
+                    tmdbYear ||
+                    "",
+    
                 id: match.Id,
                 serverId: match.ServerId,
-                rating: Number.isFinite(rating) ? rating.toFixed(1) : null,
+    
+                rating:
+                    Number.isFinite(rating)
+                        ? rating.toFixed(1)
+                        : null,
+    
                 img,
-                itemType: type === "movie" ? "Movie" : "Series",
+    
+                itemType:
+                    type === "movie"
+                        ? "Movie"
+                        : "Series",
+    
                 mediaType: "Video",
-                played: !!match.UserData?.Played,
-                isFavorite: !!match.UserData?.IsFavorite,
-                likes: match.UserData?.Likes ?? ""
+    
+                played:
+                    !!match.UserData?.Played,
+    
+                isFavorite:
+                    !!match.UserData?.IsFavorite,
+    
+                likes:
+                    match.UserData?.Likes ?? "",
+    
+                tmdbId: media.id
             });
         }
-
+    
+        console.log(
+            "[TMDb Trending] Matched:",
+            results.length,
+            "of",
+            trending.length,
+            "TMDb items against Jellyfin"
+        );
+    
         return results;
     }
 
@@ -674,14 +826,16 @@
 
         const pill = document.createElement("a");
         pill.className = "top10-pill";
-        pill.textContent = "TRAKT";
+        pill.textContent = "TMDB";
+
         pill.href = type === "movie"
-            ? "https://trakt.tv/movies/trending"
-            : "https://trakt.tv/shows/trending";
+            ? "https://www.themoviedb.org/movie"
+            : "https://www.themoviedb.org/tv";
+        
         pill.target = "_blank";
         pill.rel = "noopener noreferrer";
-        pill.title = "Open trending titles on Trakt";
-        pill.setAttribute("aria-label", "Open trending titles on Trakt");
+        pill.title = "Open titles on TMDb";
+        pill.setAttribute("aria-label", "Open titles on TMDb");
 
         titleEl.append(titleText, pill);
         titleContainer.appendChild(titleEl);

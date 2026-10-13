@@ -1,9 +1,9 @@
 
-# Jellyfin JS Custom Rows — Platform Hub + Trakt Trending Rows
+# Jellyfin JS Custom Rows — Platform Hub + TMDB Trending Rows
 
 Custom JavaScript for Jellyfin that adds configurable home-screen rows:
 
-- - **Trending Movies & Shows** — Fetches trending movies and series from [Trakt.tv](https://trakt.tv) and cross-references them against your Jellyfin library. Only shows titles you actually own, ranked 1–25 (configurable up to 50) with poster art, community ratings, and year of release.
+- - **Trending Movies & Shows** — Fetches trending movies and series from [TMDB.org](https://www.themoviedb.org/) and cross-references them against your Jellyfin library. Only shows titles you actually own, ranked 1–25 (configurable up to 50) with poster art, community ratings, and year of release.
 - **Platform Hub** — Clickable streaming platform cards (Netflix, Disney+, Apple TV+, Prime Video). Tap one to expand a scrollable row of all your content tagged with that platform.
 - **Franchise Hub** — Clickable franchise cards such as Marvel, Star Wars, DC, Pixar, Harry Potter, and Pirates of the Caribbean. Click a franchise to expand a row of library items tagged with that franchise.
 
@@ -29,25 +29,18 @@ Designed to work on any theme, but certain themes may require some manual adjust
 
 ## Requirements
 
-- Jellyfin **10.8+** (web client)
+- Jellyfin **10.8+** (web client) (Works on 12!)
 - [Jellyfin JavaScript Injector Plugin](https://github.com/n00bcodr/Jellyfin-JavaScript-Injector)
-- A free [Trakt.tv API application](https://trakt.tv/oauth/applications/new) (you only need the Client ID)
+- A free [TMDB.org API key](https://developer.themoviedb.org/docs/getting-started) (TMDB > Account > Settings > API > Copy your API key)
 - Jellyfin tags on your content tagged for platform and franchise rows
 
 ---
 
 ## Installation
 
-### 1. Create a Trakt API app
+### 1. Create a TMDB API app
 
-Go to [trakt.tv/oauth/applications/new](https://trakt.tv/oauth/applications/new):
-
-| Field | Value |
-|---|---|
-| Name | Anything (e.g. `Jellyfin Rows`) |
-| Redirect URI | `urn:ietf:wg:oauth:2.0:oob` |
-
-Save it and copy the **Client ID**.
+Go to [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api), scroll down, and copy the **API Key** (NOT the "API Read Access Token").
 
 ### 2. Add the script to Jellyfin
 
@@ -57,7 +50,7 @@ This script integrates with the [Jellyfin-JavaScript-Injector plugin](https://gi
 2. Open your Jellyfin dashboard
 3. Go to **Plugins** → **JavaScript Injector**
 4. Add a new script and paste the contents of [`jellyfin-custom-rows.js`](jellyfin-custom-rows.js)
-5. Replace `YOUR_TRAKT_CLIENT_ID_HERE` with your actual Client ID
+5. Replace `YOUR_TMDB_API_KEY` with your actual Client ID
 6. Save
 
 ### 3. Tag your content
@@ -92,7 +85,7 @@ Hard-refresh your browser (`Ctrl+Shift+R` / `Cmd+Shift+R`). The new rows will ap
 Most configuration is at the top of `jellyfin-custom-rows.js`.
 
 ```js
-const TRAKT_CLIENT_ID = "YOUR_TRAKT_CLIENT_ID_HERE";
+const TMDB_API_KEY = "YOUR_TMDB_API_KEY";
 
 const SHOW_RATING = true;
 const SHOW_TRENDING_MOVIES = true;
@@ -116,8 +109,8 @@ Use these flags to enable or disable rows:
 |---|---|
 | `SHOW_PLATFORMS` | Shows or hides the Platforms row |
 | `SHOW_FRANCHISES` | Shows or hides the Franchises row |
-| `SHOW_TRENDING_MOVIES` | Shows or hides the Trakt Trending Movies row |
-| `SHOW_TRENDING_SHOWS` | Shows or hides the Trakt Trending Shows row |
+| `SHOW_TRENDING_MOVIES` | Shows or hides the TMDB Trending Movies row |
+| `SHOW_TRENDING_SHOWS` | Shows or hides the TMDB Trending Shows row |
 
 Example:
 
@@ -134,7 +127,7 @@ const SHOW_TRENDING_SHOWS = false;
 |---|---|
 | `SHOW_RATING` | Shows or hides the community rating next to the year |
 | `SHOW_TRENDING_RANK_NUMBERS` | Shows or hides numbered rank badges |
-| `LIMIT` | Controls how many Trakt trending items are fetched and matched |
+| `LIMIT` | Controls how many TMDB trending items are fetched and matched |
 
 Example:
 
@@ -188,7 +181,7 @@ if (SHOW_TRENDING_SHOWS) {
 ## How it works
 
 ```
-Trakt.tv API ──► Trending list (25 items)
+TMDB.org API ──► Trending list (25 items)
                         │
                         ▼
 Jellyfin API ──► Full catalog ──► Map<TMDB_ID|IMDB_ID, Item>
@@ -201,7 +194,7 @@ Jellyfin API ──► Full catalog ──► Map<TMDB_ID|IMDB_ID, Item>
                               rendered on home screen
 ```
 
-1. Fetches the trending list from Trakt's public API (no OAuth needed, just the Client ID).
+1. Fetches the trending list from TMDB's public API (no OAuth needed, just the Client ID).
 2. Loads your full Jellyfin catalog for movies or series in a single API call.
 3. Indexes all items by their TMDB and IMDB provider IDs into a `Map`.
 4. Iterates through trending items and looks up each one in the map — O(1) per item.
@@ -224,11 +217,15 @@ Your content is probably missing the matching Jellyfin tag. Open the item in Jel
 **Does this work on Jellyfin apps (Android/iOS/TV)?**
 No. Custom JavaScript only runs in the web client. However, it will work if your app is a Progressive Web App.
 
-**Is my Trakt Client ID a secret?**
-No. The Client ID is a public identifier (like an OAuth `client_id`). It only grants read access to public endpoints. Your Trakt account is not exposed.
+**Is my TMDB API key a secret?**
+Yes, do not publish this key anywhere. It should only be accessible to you.
 
-**Can I use this without Trakt?**
+**Can I use this without IMDB?**
 Yes — just remove the two `buildTop10Section` lines near the bottom of the script. The Platform Hub will still work independently.
+
+**What happened to the Trakt integration?**
+This repo originally used Trakt, but Trakt has since revoked all API keys for free users and now require their premium tier for API access. This repo now uses TMDB, which is truly free and basically works exactly the same.
+
 
 ---
 
